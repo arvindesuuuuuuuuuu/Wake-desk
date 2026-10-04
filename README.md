@@ -2,6 +2,31 @@
 
 Flutter Android dashboard and authenticated Go agent for one Windows or Linux PC.
 
+## Before installing: BIOS/UEFI power setup
+
+Before installing either agent, enter your PC's BIOS/UEFI setup. The key and menu names vary by device; commonly used startup keys include **Delete** and **F2**. Check your PC's manual for the exact steps.
+
+1. Enable **Wake on LAN**, **Power On By PCI-E**, or the equivalent network wake option if your firmware provides one. The PC must retain standby power to receive a wake packet.
+2. If the firmware has an **ErP** or deep power-saving option, check whether enabling it removes standby power from the network adapter. Disable it if it prevents Wake-on-LAN.
+3. To boot automatically when power returns after unplugging the PC or switching the AVR back on, set **Restore AC Power Loss**, **AC Back**, or **After Power Failure** to **Power On** or **Always On**. A **Last State** option may leave the PC off if it was off before power was removed. This setting also makes the PC boot after an ordinary power outage.
+4. Save the BIOS changes. Test Wake-on-LAN after a normal shutdown, then test power restoration separately by removing and restoring AC power only after the PC has shut down safely.
+
+These are separate features: a Wake-on-LAN packet cannot reach a PC while its plug or AVR is off, and the power restoration setting cannot remotely switch on a manually switched-off AVR. Some systems do not support network wake from a full shutdown, even when the firmware option is enabled.
+
+## Network setup (Windows and Linux)
+
+Connect the PC by **wired Ethernet** and put the phone on the same trusted local network. Do not use guest Wi-Fi or client isolation for the phone. Reserve the PC's LAN IP in your router, and allow inbound **TCP 8787** to the agent only from your trusted LAN. The app needs the PC's LAN IP, wired Ethernet MAC address, and subnet broadcast address. A normal routed VPN or a different subnet may not carry the phone's Wake-on-LAN broadcast.
+
+**Windows:** Open **Device Manager > Network adapters > [wired adapter] > Properties**. In **Advanced**, enable **Wake on Magic Packet** if available. In **Power Management**, enable **Allow this device to wake the computer** and, if offered, **Only allow a magic packet to wake the computer**. Find the address and MAC with `ipconfig /all`. If waking from sleep works but waking after Windows shutdown does not, check the PC's firmware support and Windows Fast Startup behavior. The Windows firewall command for the agent is in the Windows section below.
+
+**Linux:** Find the wired interface and its address, MAC, and broadcast address with `ip -4 addr` and `ip link`. If `ethtool` is installed, run `sudo ethtool <interface>` and check that **Supports Wake-on** includes `g` (magic packet). If NetworkManager manages the wired connection, list profiles with `nmcli connection show --active`, then enable magic-packet wake persistently for the wired profile:
+
+```sh
+sudo nmcli connection modify "<wired-profile>" 802-3-ethernet.wake-on-lan magic
+```
+
+Reconnect the wired profile or reboot before testing. Other Linux network managers have their own persistent Wake-on-LAN settings. Restrict TCP 8787 with the firewall used by your distribution; Wake-on-LAN itself is received by the network adapter while the OS is asleep or off. Test the agent connection while the PC is running, then test Power On from sleep and shutdown separately. [Windows adapter power settings](https://learn.microsoft.com/en-us/powershell/module/netadapter/set-netadapterpowermanagement), [Linux `ethtool`](https://manpages.debian.org/unstable/ethtool/ethtool.8.en.html), [NetworkManager setting](https://www.networkmanager.dev/docs/api/latest/nm-settings-nmcli.html).
+
 ## Windows agent
 
 ### Windows control panel
