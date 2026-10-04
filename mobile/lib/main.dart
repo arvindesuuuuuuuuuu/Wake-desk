@@ -1,0 +1,445 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
+
+import 'dashboard_view.dart';
+import 'pairing.dart';
+import 'qr_scanner_page.dart';
+
+void main() => runApp(const PcControlApp());
+
+class PcControlApp extends StatelessWidget {
+  const PcControlApp({super.key});
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'WakeDesk',
+    debugShowCheckedModeBanner: false,
+    theme: appTheme(Brightness.light),
+    darkTheme: appTheme(Brightness.dark),
+    home: const Dashboard(),
+  );
+}
+
+class Dashboard extends StatefulWidget {
+  const Dashboard({super.key});
+  @override
+  State<Dashboard> createState() => _DashboardState();
+}
+
+class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
+  final storage = const FlutterSecureStorage();
+  Map<String, dynamic> settings = {};
+  Map<String, dynamic>? status;
+  Timer? timer;
+  bool checking = false, busy = false, ready = false;
+  String connection = 'Not connected';
+  int revision = 0;
+  DateTime? lastChecked;
+  String? activity;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    load();
+  }
+
+  Future<void> load() async {
+    try {
+      final raw = await storage.read(key: 'connection');
+      if (raw != null) settings = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      connection = 'Could not load saved settings';
+    }
+    if (!mounted) return;
+    setState(() => ready = true);
+    startPolling();
+  }
+
+  void startPolling() {
+    timer?.cancel();
+    refresh();
+    timer = Timer.periodic(const Duration(seconds: 5), (_) => refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && ready) {
+      startPolling();
+    } else {
+      timer?.cancel();
+    }
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<Map<String, dynamic>> request(String path, {String? command}) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final uri = Uri.parse('${settings['url']}$path');
+      final req = await client
+          .openUrl(command == null ? 'GET' : 'POST', uri)
+          .timeout(const Duration(seconds: 5));
+      req.headers.set('Authorization', 'Bearer ${settings['token']}');
+      if (command != null) {
+        req.headers.contentType = ContentType.json;
+        req.write(jsonEncode({'command': command}));
+      }
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      final body = await utf8.decoder
+          .bind(res)
+          .join()
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode == 401) {
+        throw const HttpException('Authentication failed');
+      }
+      if (res.statusCode != 200) {
+        throw HttpException('Agent error (${res.statusCode})');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> refresh() async {
+    if (!ready || checking || settings['url'] == null) return;
+    setState(() => checking = true);
+    final version = revision;
+    try {
+      final result = await request('/v1/status');
+      if (mounted && version == revision) {
+        setState(() {
+          status = result;
+          connection = 'Online';
+          lastChecked = DateTime.now();
+        });
+      }
+    } catch (e) {
+      if (mounted && version == revision) {
+        setState(() {
+          status = null;
+          connection = e is HttpException ? e.message : 'Offline';
+          lastChecked = DateTime.now();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => checking = false);
+    }
+  }
+
+  void notice(String message) {
+    if (mounted) {
+      setState(() => activity = message);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  Future<void> command(String action) async {
+    if (busy) return;
+    if (action != 'lock') {
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${label(action)} this PC?'),
+          content: Text(
+            action == 'sleep'
+                ? 'The PC will disconnect until it wakes.'
+                : 'Save any open work before continuing.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(label(action)),
+            ),
+          ],
+        ),
+      );
+      if (approved != true || !mounted) return;
+    }
+    setState(() => busy = true);
+    try {
+      await request('/v1/commands', command: action);
+      notice('${label(action)} requested');
+    } catch (_) {
+      notice('No confirmation received. Check the PC before retrying.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+      refresh();
+    }
+  }
+
+  Future<void> wake() async {
+    setState(() => busy = true);
+    RawDatagramSocket? socket;
+    try {
+      final mac = (settings['mac'] as String? ?? '').replaceAll(
+        RegExp('[:-]'),
+        '',
+      );
+      if (!RegExp(r'^[0-9a-fA-F]{12}$').hasMatch(mac)) {
+        throw const FormatException();
+      }
+      final bytes = List.generate(
+        6,
+        (i) => int.parse(mac.substring(i * 2, i * 2 + 2), radix: 16),
+      );
+      final packet = <int>[
+        ...List.filled(6, 255),
+        for (var i = 0; i < 16; i++) ...bytes,
+      ];
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.broadcastEnabled = true;
+      final sent = socket.send(
+        packet,
+        InternetAddress(settings['broadcast'] as String),
+        9,
+      );
+      if (sent != packet.length) throw const SocketException('Send failed');
+      notice('Wake packet sent');
+    } catch (_) {
+      notice('Could not send wake packet. Check MAC and broadcast address.');
+    } finally {
+      socket?.close();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  String label(String action) => switch (action) {
+    'shutdown' => 'Shutdown',
+    'restart' => 'Restart',
+    'sleep' => 'Sleep',
+    _ => 'Lock',
+  };
+  Future<void> configure() async {
+    final updated = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => SettingsPage(initial: settings)),
+    );
+    if (updated == null || !mounted) return;
+    try {
+      await storage.write(key: 'connection', value: jsonEncode(updated));
+    } catch (_) {
+      notice('Could not save settings');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      settings = updated;
+      status = null;
+      connection = 'Connecting';
+      revision++;
+    });
+    refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DashboardView(
+      settings: settings,
+      status: status,
+      connection: connection,
+      ready: ready,
+      busy: busy,
+      checking: checking,
+      onRefresh: refresh,
+      onConfigure: configure,
+      onWake: wake,
+      onCommand: command,
+      lastChecked: lastChecked,
+      activity: activity,
+    );
+  }
+}
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key, required this.initial});
+  final Map<String, dynamic> initial;
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  final form = GlobalKey<FormState>();
+  bool showToken = false;
+  late final Map<String, TextEditingController> fields;
+  bool scanned = false;
+
+  Future<void> scan() async {
+    final result = await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(builder: (_) => const QrScannerPage()),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      for (final entry in result.entries) {
+        fields[entry.key]!.text = entry.value;
+      }
+      showToken = false;
+      scanned = true;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    fields = {
+      for (final key in ['name', 'url', 'token', 'mac', 'broadcast'])
+        key: TextEditingController(
+          text:
+              widget.initial[key] as String? ??
+              (key == 'broadcast' ? '255.255.255.255' : ''),
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final field in fields.values) {
+      field.dispose();
+    }
+    super.dispose();
+  }
+
+  String? validate(String key, String value) {
+    return validateConnectionField(key, value);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Connection')),
+    body: SafeArea(
+      top: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: Form(
+            key: form,
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                OutlinedButton.icon(
+                  onPressed: scan,
+                  icon: const Icon(Icons.qr_code_scanner_rounded),
+                  label: const Text('Scan PC QR code'),
+                ),
+                const SizedBox(height: 16),
+                for (final entry in {
+                  'name': 'PC nickname',
+                  'url': 'Agent URL',
+                  'token': 'Access token',
+                  'mac': 'Ethernet MAC address',
+                  'broadcast': 'Broadcast address',
+                }.entries) ...[
+                  if (entry.key == 'name' || entry.key == 'mac')
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 18, top: 8),
+                      child: Text(
+                        entry.key == 'name' ? 'Windows agent' : 'Wake-on-LAN',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: TextFormField(
+                      controller: fields[entry.key],
+                      decoration: InputDecoration(
+                        labelText: entry.value,
+                        prefixIcon: Icon(switch (entry.key) {
+                          'name' => Icons.desktop_windows_outlined,
+                          'url' => Icons.link_rounded,
+                          'token' => Icons.key_rounded,
+                          'mac' => Icons.lan_outlined,
+                          _ => Icons.wifi_tethering_rounded,
+                        }),
+                        suffixIcon: entry.key == 'token'
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: showToken
+                                        ? 'Hide token'
+                                        : 'Show token',
+                                    icon: Icon(
+                                      showToken
+                                          ? Icons.visibility_off_outlined
+                                          : Icons.visibility_outlined,
+                                    ),
+                                    onPressed: () =>
+                                        setState(() => showToken = !showToken),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Paste token',
+                                    icon: const Icon(
+                                      Icons.content_paste_rounded,
+                                    ),
+                                    onPressed: () async {
+                                      final data = await Clipboard.getData(
+                                        Clipboard.kTextPlain,
+                                      );
+                                      if (mounted && data?.text != null) {
+                                        fields['token']!.text = data!.text!
+                                            .trim();
+                                      }
+                                    },
+                                  ),
+                                ],
+                              )
+                            : null,
+                      ),
+                      obscureText: entry.key == 'token' && !showToken,
+                      keyboardType: entry.key == 'url'
+                          ? TextInputType.url
+                          : TextInputType.text,
+                      textInputAction: entry.key == 'broadcast'
+                          ? TextInputAction.done
+                          : TextInputAction.next,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      validator: (value) =>
+                          validate(entry.key, value?.trim() ?? ''),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () {
+                    if (!form.currentState!.validate()) return;
+                    final result = {
+                      for (final entry in fields.entries)
+                        entry.key: entry.value.text.trim(),
+                    };
+                    result['url'] = result['url']!.replaceFirst(
+                      RegExp(r'/$'),
+                      '',
+                    );
+                    Navigator.pop(context, result);
+                  },
+                  icon: const Icon(Icons.check),
+                  label: Text(scanned ? 'Connect' : 'Save'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}

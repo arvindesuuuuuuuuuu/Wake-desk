@@ -1,0 +1,11 @@
+agent/config.json
+agent/*.exe
+agent/*.log
+agent/cmd/agent-gui/*.syso
+dist/
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+local.properties
+*.iml
+.idea/

@@ -1,0 +1,17 @@
+[Unit]
+Description=WakeDesk PC control agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wakedesk-agent -config /etc/wakedesk/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
