@@ -66,9 +66,17 @@ class DashboardView extends StatelessWidget {
     required this.onConfigure,
     required this.onWake,
     required this.onCommand,
+    this.devices = const [],
+    this.selectedDevice = 0,
+    this.onSelectDevice,
+    this.onAddDevice,
     this.lastChecked,
     this.activity,
   });
+  final List<Map<String, dynamic>> devices;
+  final int selectedDevice;
+  final Future<void> Function(int)? onSelectDevice;
+  final Future<void> Function()? onAddDevice;
   final Map<String, dynamic> settings;
   final Map<String, dynamic>? status;
   final String connection;
@@ -119,6 +127,41 @@ class DashboardView extends StatelessWidget {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
                 children: [
+                  if (devices.isNotEmpty) ...[
+                    DropdownButtonFormField<int>(
+                      key: ValueKey('$selectedDevice:$busy'),
+                      initialValue: selectedDevice,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Control PC',
+                        prefixIcon: Icon(Icons.computer_rounded),
+                      ),
+                      items: [
+                        for (var i = 0; i < devices.length; i++)
+                          DropdownMenuItem(
+                            value: i,
+                            child: Text(
+                              devices[i]['name'] as String? ?? 'PC ${i + 1}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: ready && !busy && onSelectDevice != null
+                          ? (value) {
+                              if (value != null) onSelectDevice!(value);
+                            }
+                          : null,
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: ready && !busy ? onAddDevice : null,
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('Add PC'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

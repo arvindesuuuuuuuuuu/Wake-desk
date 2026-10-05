@@ -32,7 +32,10 @@ class Dashboard extends StatefulWidget {
 
 class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   final storage = const FlutterSecureStorage();
-  Map<String, dynamic> settings = {};
+  List<Map<String, dynamic>> devices = [];
+  int selectedDevice = 0;
+  Map<String, dynamic> get settings =>
+      devices.isEmpty ? {} : devices[selectedDevice];
   Map<String, dynamic>? status;
   Timer? timer;
   bool checking = false, busy = false, ready = false;
@@ -50,8 +53,21 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
 
   Future<void> load() async {
     try {
-      final raw = await storage.read(key: 'connection');
-      if (raw != null) settings = jsonDecode(raw) as Map<String, dynamic>;
+      final raw = await storage.read(key: 'devices');
+      if (raw != null) {
+        final saved = jsonDecode(raw) as Map<String, dynamic>;
+        devices = (saved['devices'] as List)
+            .map((device) => Map<String, dynamic>.from(device as Map))
+            .toList();
+        final selected = saved['selected'] as int? ?? 0;
+        selectedDevice = selected >= 0 && selected < devices.length ? selected : 0;
+      } else {
+        final legacy = await storage.read(key: 'connection');
+        if (legacy != null) {
+          final device = jsonDecode(legacy) as Map<String, dynamic>;
+          if (device.isNotEmpty) devices = [device];
+        }
+      }
     } catch (_) {
       connection = 'Could not load saved settings';
     }
@@ -83,13 +99,14 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Future<Map<String, dynamic>> request(String path, {String? command}) async {
+    final target = settings;
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
     try {
-      final uri = Uri.parse('${settings['url']}$path');
+      final uri = Uri.parse('${target['url']}$path');
       final req = await client
           .openUrl(command == null ? 'GET' : 'POST', uri)
           .timeout(const Duration(seconds: 5));
-      req.headers.set('Authorization', 'Bearer ${settings['token']}');
+      req.headers.set('Authorization', 'Bearer ${target['token']}');
       if (command != null) {
         req.headers.contentType = ContentType.json;
         req.write(jsonEncode({'command': command}));
@@ -133,7 +150,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         });
       }
     } finally {
-      if (mounted) setState(() => checking = false);
+      if (mounted && version == revision) {
+        setState(() => checking = false);
+      }
     }
   }
 
@@ -146,12 +165,13 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Future<void> command(String action) async {
-    if (busy) return;
+    if (busy || settings.isEmpty) return;
+    setState(() => busy = true);
     if (action != 'lock') {
       final approved = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('${label(action)} this PC?'),
+          title: Text('${label(action)} ${settings['name']}?'),
           content: Text(
             action == 'sleep'
                 ? 'The PC will disconnect until it wakes.'
@@ -169,9 +189,11 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
           ],
         ),
       );
-      if (approved != true || !mounted) return;
+      if (approved != true || !mounted) {
+        if (mounted) setState(() => busy = false);
+        return;
+      }
     }
-    setState(() => busy = true);
     try {
       await request('/v1/commands', command: action);
       notice('${label(action)} requested');
@@ -184,6 +206,7 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
   }
 
   Future<void> wake() async {
+    if (busy || settings.isEmpty) return;
     setState(() => busy = true);
     RawDatagramSocket? socket;
     try {
@@ -225,39 +248,78 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     'sleep' => 'Sleep',
     _ => 'Lock',
   };
-  Future<void> configure() async {
-    final updated = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(builder: (_) => SettingsPage(initial: settings)),
-    );
-    if (updated == null || !mounted) return;
+  Future<void> saveDevices(
+    List<Map<String, dynamic>> updated,
+    int selected,
+  ) async {
+    if (busy) return;
+    setState(() => busy = true);
     try {
-      await storage.write(key: 'connection', value: jsonEncode(updated));
+      await storage.write(
+        key: 'devices',
+        value: jsonEncode({'devices': updated, 'selected': selected}),
+      );
+      if (!mounted) return;
+      setState(() {
+        devices = updated;
+        selectedDevice = selected;
+        status = null;
+        lastChecked = null;
+        activity = null;
+        connection = 'Connecting';
+        checking = false;
+        revision++;
+      });
     } catch (_) {
       notice('Could not save settings');
-      return;
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
-    if (!mounted) return;
-    setState(() {
-      settings = updated;
-      status = null;
-      connection = 'Connecting';
-      revision++;
-    });
-    refresh();
+    if (mounted) refresh();
+  }
+
+  Future<void> selectDevice(int selected) async {
+    if (busy || selected == selectedDevice) return;
+    await saveDevices(devices, selected);
+  }
+
+  Future<void> configure({bool add = false}) async {
+    if (busy) return;
+    final updated = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          initial: add ? {} : settings,
+          adding: add || devices.isEmpty,
+        ),
+      ),
+    );
+    if (updated == null || !mounted) return;
+    final next = [...devices];
+    final selected = add || next.isEmpty ? next.length : selectedDevice;
+    if (selected == next.length) {
+      next.add(updated);
+    } else {
+      next[selected] = updated;
+    }
+    await saveDevices(next, selected);
   }
 
   @override
   Widget build(BuildContext context) {
     return DashboardView(
       settings: settings,
+      devices: devices,
+      selectedDevice: selectedDevice,
+      onSelectDevice: selectDevice,
+      onAddDevice: () => configure(add: true),
       status: status,
       connection: connection,
       ready: ready,
       busy: busy,
       checking: checking,
       onRefresh: refresh,
-      onConfigure: configure,
+      onConfigure: () => configure(),
       onWake: wake,
       onCommand: command,
       lastChecked: lastChecked,
@@ -267,7 +329,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
 }
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.initial});
+  const SettingsPage({super.key, required this.initial, this.adding = false});
+  final bool adding;
   final Map<String, dynamic> initial;
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -321,7 +384,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Connection')),
+    appBar: AppBar(title: Text(widget.adding ? 'Add PC' : 'Connection')),
     body: SafeArea(
       top: false,
       child: Center(
@@ -349,7 +412,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 18, top: 8),
                       child: Text(
-                        entry.key == 'name' ? 'Windows agent' : 'Wake-on-LAN',
+                        entry.key == 'name' ? 'PC agent' : 'Wake-on-LAN',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,

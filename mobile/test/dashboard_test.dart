@@ -134,6 +134,12 @@ void main() {
                 .copyWith(textScaler: const TextScaler.linear(1.6)),
             child: DashboardView(
               settings: {...settings, 'name': 'Workstation-Engineering-Office'},
+              devices: [
+                {...settings, 'name': 'Workstation-Engineering-Office'},
+                {...settings, 'name': 'Home PC'},
+              ],
+              onSelectDevice: (_) async {},
+              onAddDevice: () async {},
               status: null,
               connection: 'Authentication failed',
               ready: true,
