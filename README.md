@@ -1,6 +1,6 @@
 # WakeDesk
 
-Flutter Android dashboard and authenticated Go agent for one Windows or Linux PC.
+Flutter Android dashboard and authenticated Go agents for Windows and Linux PCs.
 
 ## Before installing: BIOS/UEFI power setup
 
@@ -95,6 +95,10 @@ sudo systemctl restart wakedesk-agent
 The Linux service uses `systemctl` for shutdown, restart, and suspend, and `loginctl lock-sessions` for Lock. Lock requires a graphical session that supports systemd-logind's lock request; some desktops or screen lockers may ignore it. The service runs as root so power actions can run without an interactive authorization prompt. Keep the access token private, limit the port to your trusted network, and use HTTPS or a private VPN outside that network. `POST /v1/agent/stop` stops the service until it is started again; the unit only restarts after a failure. Power On still sends Wake-on-LAN from the Android phone and requires the PC to have standby power and a wired network connection. A PC disconnected from AC power cannot receive a wake packet.
 
 ## Android app
+
+### Saved PCs
+
+The Android dashboard's **Control PC** selector chooses which saved PC receives status checks, power commands, and Wake-on-LAN packets. Tap **Add PC** to configure another Windows or Linux device manually or scan its pairing QR code. Saving selects the new PC. **Connection settings** edits the selected PC. Each PC's credentials are kept in Android secure storage, and the selected PC is remembered across app restarts. Existing single-PC settings are preserved as the first device. Install an agent on each PC you want to control.
 
 ### QR pairing
 
