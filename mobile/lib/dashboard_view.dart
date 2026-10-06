@@ -66,6 +66,8 @@ class DashboardView extends StatelessWidget {
     required this.onConfigure,
     required this.onWake,
     required this.onCommand,
+    this.onEnrollUnlock,
+    this.onApproveUnlock,
     this.devices = const [],
     this.selectedDevice = 0,
     this.onSelectDevice,
@@ -83,6 +85,7 @@ class DashboardView extends StatelessWidget {
   final bool ready, busy, checking;
   final Future<void> Function() onRefresh, onConfigure, onWake;
   final Future<void> Function(String) onCommand;
+  final Future<void> Function()? onEnrollUnlock, onApproveUnlock;
   final DateTime? lastChecked;
   final String? activity;
 
@@ -352,6 +355,24 @@ class DashboardView extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 22),
+                  if (configured && onApproveUnlock != null) ...[
+                    const Divider(),
+                    const SizedBox(height: 20),
+                    const _SectionTitle('Phone sign-in'),
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: online && !busy ? onApproveUnlock : null,
+                      icon: const Icon(Icons.phonelink_lock_rounded),
+                      label: const Text('Approve Ubuntu sign-in'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: online && !busy ? onEnrollUnlock : null,
+                      icon: const Icon(Icons.key_rounded),
+                      label: const Text('Enroll this phone'),
+                    ),
+                    const SizedBox(height: 22),
+                  ],
                   if (busy) const LinearProgressIndicator(minHeight: 3),
                   if (activity != null)
                     Padding(

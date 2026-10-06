@@ -2,13 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 
 import 'dashboard_view.dart';
 import 'pairing.dart';
 import 'qr_scanner_page.dart';
+import 'unlock_identity.dart';
 
 void main() => runApp(const PcControlApp());
 
@@ -60,7 +63,9 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
             .map((device) => Map<String, dynamic>.from(device as Map))
             .toList();
         final selected = saved['selected'] as int? ?? 0;
-        selectedDevice = selected >= 0 && selected < devices.length ? selected : 0;
+        selectedDevice = selected >= 0 && selected < devices.length
+            ? selected
+            : 0;
       } else {
         final legacy = await storage.read(key: 'connection');
         if (legacy != null) {
@@ -98,18 +103,22 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Future<Map<String, dynamic>> request(String path, {String? command}) async {
+  Future<Map<String, dynamic>> request(
+    String path, {
+    String? command,
+    Map<String, dynamic>? data,
+  }) async {
     final target = settings;
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
     try {
       final uri = Uri.parse('${target['url']}$path');
       final req = await client
-          .openUrl(command == null ? 'GET' : 'POST', uri)
+          .openUrl(command == null && data == null ? 'GET' : 'POST', uri)
           .timeout(const Duration(seconds: 5));
       req.headers.set('Authorization', 'Bearer ${target['token']}');
-      if (command != null) {
+      if (command != null || data != null) {
         req.headers.contentType = ContentType.json;
-        req.write(jsonEncode({'command': command}));
+        req.write(jsonEncode(command != null ? {'command': command} : data));
       }
       final res = await req.close().timeout(const Duration(seconds: 8));
       final body = await utf8.decoder
@@ -120,7 +129,10 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
         throw const HttpException('Authentication failed');
       }
       if (res.statusCode != 200) {
-        throw HttpException('Agent error (${res.statusCode})');
+        final detail = body.trim();
+        throw HttpException(
+          detail.isEmpty ? 'Agent error (${res.statusCode})' : detail,
+        );
       }
       return jsonDecode(body) as Map<String, dynamic>;
     } finally {
@@ -242,12 +254,116 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> enrollPhoneUnlock() async {
+    if (busy || settings.isEmpty) return;
+    final controller = TextEditingController();
+    final username = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enroll phone sign-in'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'Ubuntu username'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Request enrollment'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (username == null ||
+        !RegExp(r'^[a-z_][a-z0-9_-]{0,31}$').hasMatch(username)) {
+      if (username != null) notice('Enter a valid Ubuntu username.');
+      return;
+    }
+    setState(() => busy = true);
+    UnlockIdentity? identity;
+    try {
+      identity = await UnlockIdentityStore(storage)
+          .loadOrCreate(settings['url'] as String);
+      await request(
+        '/v1/unlock/enrollments',
+        data: {
+          'id': identity.deviceId,
+          'name': 'WakeDesk Android phone',
+          'user': username,
+          'public_key': identity.publicKey,
+        },
+      );
+      notice(
+        'Enrollment requested. Approve this phone in the Ubuntu WakeDesk panel within 5 minutes.',
+      );
+    } catch (error) {
+      notice('Could not request phone enrollment: ${errorText(error)}');
+    } finally {
+      identity?.keyPair.destroy();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> approvePhoneUnlock() async {
+    if (busy || settings.isEmpty) return;
+    setState(() => busy = true);
+    UnlockIdentity? identity;
+    try {
+      final authenticated = await LocalAuthentication().authenticate(
+        localizedReason:
+            'Approve sign-in to ${settings['name'] ?? 'your Ubuntu PC'}',
+        biometricOnly: false,
+      );
+      if (!authenticated) return;
+      identity = await UnlockIdentityStore(storage)
+          .loadOrCreate(settings['url'] as String);
+      final challenge = await request(
+        '/v1/unlock/challenges',
+        data: {'device_id': identity.deviceId},
+      );
+      final signature = await Ed25519().sign(
+        utf8.encode(challenge['message'] as String),
+        keyPair: identity.keyPair,
+      );
+      await request(
+        '/v1/unlock/approvals',
+        data: {
+          'challenge_id': challenge['challenge_id'],
+          'signature': base64.encode(signature.bytes).replaceAll('=', ''),
+        },
+      );
+      notice(
+        'Sign-in approved for ${challenge['user']}. At Ubuntu, submit the login form within 30 seconds.',
+      );
+    } catch (error) {
+      notice('Could not approve sign-in: ${errorText(error)}');
+    } finally {
+      identity?.keyPair.destroy();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   String label(String action) => switch (action) {
     'shutdown' => 'Shutdown',
     'restart' => 'Restart',
     'sleep' => 'Sleep',
     _ => 'Lock',
   };
+
+  String errorText(Object error) {
+    final text = error.toString().replaceFirst(
+      RegExp(r'^(HttpException|Exception):\s*'),
+      '',
+    );
+    return text.length > 180 ? '${text.substring(0, 177)}…' : text;
+  }
+
   Future<void> saveDevices(
     List<Map<String, dynamic>> updated,
     int selected,
@@ -322,6 +438,8 @@ class _DashboardState extends State<Dashboard> with WidgetsBindingObserver {
       onConfigure: () => configure(),
       onWake: wake,
       onCommand: command,
+      onEnrollUnlock: enrollPhoneUnlock,
+      onApproveUnlock: approvePhoneUnlock,
       lastChecked: lastChecked,
       activity: activity,
     );

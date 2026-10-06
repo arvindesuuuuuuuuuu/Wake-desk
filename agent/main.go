@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,10 @@ type status struct {
 }
 
 func handler(token string, info func() status, execute func(string) error, stop func()) http.Handler {
+	return handlerWithUnlock(token, info, execute, stop, nil)
+}
+
+func handlerWithUnlock(token string, info func() status, execute func(string) error, stop func(), unlock *unlockManager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/agent/stop", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -85,6 +91,9 @@ func handler(token string, info func() status, execute func(string) error, stop 
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "requested"})
 	})
+	if unlock != nil {
+		mux.Handle("/v1/unlock/", unlock.publicHandler())
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
@@ -130,9 +139,19 @@ func main() {
 		log.Fatal("both TLS certificate and key are required")
 	}
 	server := &http.Server{Addr: cfg.Listen, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	var unlock *unlockManager
+	if runtime.GOOS == "linux" && filepath.Clean(*path) == "/etc/wakedesk/config.json" {
+		unlock, err = newUnlockManager("/etc/wakedesk/unlock.json")
+		if err != nil {
+			log.Fatal(err)
+		}
+		if _, err = unlock.startLocalServer(); err != nil {
+			log.Fatal(err)
+		}
+	}
 	stopped := make(chan struct{})
 	var once sync.Once
-	server.Handler = handler(cfg.Token, systemStatus, executeCommand, func() {
+	server.Handler = handlerWithUnlock(cfg.Token, systemStatus, executeCommand, func() {
 		once.Do(func() {
 			go func() {
 				defer close(stopped)
@@ -143,7 +162,7 @@ func main() {
 				}
 			}()
 		})
-	})
+	}, unlock)
 	fmt.Printf("WakeDesk agent listening on %s\n", cfg.Listen)
 	if cfg.Cert != "" {
 		err = server.ListenAndServeTLS(cfg.Cert, cfg.Key)

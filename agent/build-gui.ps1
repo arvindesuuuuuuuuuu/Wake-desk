@@ -8,7 +8,7 @@ go build -ldflags '-H=windowsgui' -o pc-agent-gui.exe ./cmd/agent-gui
 if ($LASTEXITCODE -ne 0) { throw 'GUI build failed' }
 $outputDir = Join-Path $PSScriptRoot '..\dist\PC-Control-Windows'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
-Copy-Item -LiteralPath pc-agent.exe,pc-agent-gui.exe,install.ps1,uninstall.ps1 -Destination $outputDir -Force
+Copy-Item -LiteralPath pc-agent.exe,pc-agent-gui.exe,install.ps1,uninstall.ps1,enable-wol.ps1 -Destination $outputDir -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\README.md') -Destination $outputDir -Force
 Compress-Archive -Path (Join-Path $outputDir '*') -DestinationPath (Join-Path $PSScriptRoot '..\dist\PC-Control-Windows.zip') -Force
 Write-Host "Windows app built: $outputDir\pc-agent-gui.exe"

@@ -17,9 +17,9 @@ These are separate features: a Wake-on-LAN packet cannot reach a PC while its pl
 
 Connect the PC by **wired Ethernet** and put the phone on the same trusted local network. Do not use guest Wi-Fi or client isolation for the phone. Reserve the PC's LAN IP in your router, and allow inbound **TCP 8787** to the agent only from your trusted LAN. The app needs the PC's LAN IP, wired Ethernet MAC address, and subnet broadcast address. A normal routed VPN or a different subnet may not carry the phone's Wake-on-LAN broadcast.
 
-**Windows:** Open **Device Manager > Network adapters > [wired adapter] > Properties**. In **Advanced**, enable **Wake on Magic Packet** if available. In **Power Management**, enable **Allow this device to wake the computer** and, if offered, **Only allow a magic packet to wake the computer**. Find the address and MAC with `ipconfig /all`. If waking from sleep works but waking after Windows shutdown does not, check the PC's firmware support and Windows Fast Startup behavior. The Windows firewall command for the agent is in the Windows section below.
+**Windows:** In the WakeDesk control panel, select the wired adapter and click **Enable Wake-on-LAN**, then approve the administrator prompt. This enables the driver's standard magic-packet power setting when the adapter supports it. You can also configure it manually in **Device Manager > Network adapters > [wired adapter] > Properties**: in **Advanced**, enable **Wake on Magic Packet** if available; in **Power Management**, enable **Allow this device to wake the computer** and, if offered, **Only allow a magic packet to wake the computer**. Find the address and MAC with `ipconfig /all`. If waking from sleep works but waking after Windows shutdown does not, check the PC's firmware support and Windows Fast Startup behavior. The Windows firewall command for the agent is in the Windows section below.
 
-**Linux:** Find the wired interface and its address, MAC, and broadcast address with `ip -4 addr` and `ip link`. If `ethtool` is installed, run `sudo ethtool <interface>` and check that **Supports Wake-on** includes `g` (magic packet). If NetworkManager manages the wired connection, list profiles with `nmcli connection show --active`, then enable magic-packet wake persistently for the wired profile:
+**Linux:** In the WakeDesk control panel, select the wired adapter and click **Enable Wake-on-LAN for selected adapter**. Authenticate when prompted. The panel verifies support with `ethtool` when available, saves `magic` wake persistently in the active NetworkManager Ethernet profile, and applies it immediately when possible. On Ubuntu/Debian, install the required utilities with `sudo apt install network-manager ethtool`. You can also configure it manually: find the wired interface with `ip -4 addr` and `ip link`, run `sudo ethtool <interface>`, and check that **Supports Wake-on** includes `g` (magic packet). List NetworkManager profiles with `nmcli connection show --active`, then enable magic-packet wake for the wired profile:
 
 ```sh
 sudo nmcli connection modify "<wired-profile>" 802-3-ethernet.wake-on-lan magic
@@ -110,6 +110,29 @@ The panel requires Python 3 and GTK 3 Python bindings. Building its QR helper re
 
 ```sh
 /usr/bin/python3 -m unittest discover -s agent/linux-ui -p 'test_*.py' -v
+```
+
+### Ubuntu phone sign-in
+
+WakeDesk can authorize a GDM sign-in without sending or storing the Ubuntu password. The Android app creates a per-PC Ed25519 key in secure storage. Enrollment expires after five minutes and must be approved locally through the Ubuntu control panel with administrator authentication. Each sign-in approval uses a fresh signed challenge, expires after 30 seconds, and can be consumed only once. Root enrollment is rejected, and the local PAM socket is accessible only to root.
+
+Install this integration only after confirming ordinary password login works. Keep another administrator session or recovery console available while initially testing any PAM change:
+
+```sh
+cd agent
+go build -o pc-agent-linux .
+sudo sh ./install-linux.sh
+sudo sh ./install-linux-unlock.sh
+```
+
+Rebuild and install the Android app after running `flutter pub get`. In the app, connect to the PC, tap **Enroll this phone**, and enter the Ubuntu username. Within five minutes, open the Ubuntu WakeDesk panel, click **Check enrollment**, verify the phone and username, then click **Approve phone**.
+
+To sign in, select the Ubuntu account, tap **Approve Ubuntu sign-in** on the phone, authenticate using the phone's biometric or device credential, then submit the Ubuntu login form within 30 seconds. GDM may require non-empty text in its password field; that text is ignored when a valid approval is consumed. If approval is absent, expired, invalid, or already used, the normal password modules continue unchanged. Passwordless login does not provide the password needed to automatically unlock an existing GNOME Keyring.
+
+Disable the PAM integration while preserving ordinary password login with:
+
+```sh
+sudo sh ./agent/install-linux-unlock.sh --remove
 ```
 
 The GTK smoke test requires a desktop display; it is skipped on headless systems.

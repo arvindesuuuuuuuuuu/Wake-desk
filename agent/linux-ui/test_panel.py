@@ -40,6 +40,13 @@ class PanelTests(unittest.TestCase):
     def test_running_settings_drafts_discard_and_pairing_clipboard(self, _):
         window = panel.Panel(self.app)
         self.addCleanup(window.destroy)
+        self.assertEqual(window.get_size(), (520, 600))
+        self.assertEqual(
+            {window.stack.child_get_property(child, 'name')
+             for child in window.stack.get_children()},
+            {'overview', 'connection', 'security'},
+        )
+        self.assertEqual(window.stack.get_visible_child_name(), 'overview')
         window.state = {'LoadState': 'loaded', 'ActiveState': 'active',
                         'UnitFileState': 'enabled'}
         window.config = {'listen': '0.0.0.0:8787', 'token': 'test-token-' * 8}
@@ -84,11 +91,13 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(window.fields['token'].get_text(), original['token'])
         self.assertTrue(window.copy_token.get_sensitive())
         self.assertTrue(window.qr_button.get_sensitive())
+        self.assertTrue(window.wol_button.get_sensitive())
         window.busy = True
         window.controls()
         self.assertFalse(window.start.get_sensitive())
         self.assertFalse(window.save.get_sensitive())
         self.assertFalse(window.unlock.get_sensitive())
+        self.assertFalse(window.wol_button.get_sensitive())
 
     @patch('panel.subprocess.run')
     def test_qr_request_uses_stdin_and_saved_connection(self, run):
@@ -124,6 +133,7 @@ class PanelTests(unittest.TestCase):
         window.network.append_text('eth0 — 192.168.1.50')
         window.network.set_active(0)
         window.fill_config()
+        window.stack.set_visible_child_name('connection')
         deadline = time.monotonic() + 1
         while time.monotonic() < deadline:
             while panel.GLib.MainContext.default().pending():

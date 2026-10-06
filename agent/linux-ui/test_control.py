@@ -69,6 +69,35 @@ class ConfigurationTests(unittest.TestCase):
                                               'broadcast': '10.0.1.255'}])
         run.assert_called_once_with('ip', '-j', 'address', 'show', 'up')
 
+    @patch('control.subprocess.run')
+    @patch('control.shutil.which', return_value='/usr/bin/tool')
+    @patch('control.Path.exists', return_value=True)
+    @patch('control.adapters', return_value=[{'name': 'eth0'}])
+    @patch('control.run')
+    def test_enable_wol_validates_and_persists_selected_ethernet(
+            self, run, _adapters, _exists, _which, process):
+        run.side_effect = [
+            'Supports Wake-on: pg\nWake-on: d\n',
+            'ethernet\n12345678-1234-1234-1234-123456789abc\n',
+            '',
+            '',
+        ]
+        process.return_value.returncode = 0
+        self.assertEqual(control.enable_wol('eth0'),
+                         {'interface': 'eth0', 'active': True})
+        self.assertEqual(run.call_args_list[2].args,
+                         ('nmcli', 'connection', 'modify', 'uuid',
+                          '12345678-1234-1234-1234-123456789abc',
+                          '802-3-ethernet.wake-on-lan', 'magic'))
+        self.assertEqual(run.call_args_list[3].args,
+                         ('ethtool', '-s', 'eth0', 'wol', 'g'))
+
+    @patch('control.adapters', return_value=[{'name': 'eth0'}])
+    def test_enable_wol_rejects_unlisted_or_unsafe_adapter(self, _):
+        for name in ('eth1', 'eth0;reboot', '../eth0'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                control.enable_wol(name)
+
     @patch('control.os.geteuid', return_value=0)
     @patch('control.run')
     @patch('control.sys.argv', ['control.py', 'restart-other-service'])

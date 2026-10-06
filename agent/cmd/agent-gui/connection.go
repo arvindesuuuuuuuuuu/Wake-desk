@@ -102,7 +102,7 @@ func fetchStatus(c configuration) (agentStatus, error) {
 	return status, err
 }
 
-type adapter struct{ Name, IP, MAC, Broadcast string }
+type adapter struct{ Name, Interface, IP, MAC, Broadcast string }
 
 // Older agents lack this endpoint; callers can use their original launcher.
 func requestAgentStop(c configuration) (bool, error) {
@@ -147,7 +147,7 @@ func networkAdapters() []adapter {
 			for i := range broadcast {
 				broadcast[i] = ipv4[i] | ^subnet.Mask[i]
 			}
-			result = append(result, adapter{Name: iface.Name + " - " + ip.String(), IP: ip.String(), MAC: strings.ToUpper(iface.HardwareAddr.String()), Broadcast: broadcast.String()})
+			result = append(result, adapter{Name: iface.Name + " - " + ip.String(), Interface: iface.Name, IP: ip.String(), MAC: strings.ToUpper(iface.HardwareAddr.String()), Broadcast: broadcast.String()})
 		}
 	}
 	return result

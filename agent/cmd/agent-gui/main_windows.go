@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ type panel struct {
 	network                                        *walk.ComboBox
 	logs                                           *walk.TextEdit
 	start, stop, save, rotate, startupButton       *walk.PushButton
+	wolButton                                      *walk.PushButton
 	discard, refreshButton                         *walk.PushButton
 	cfg                                            configuration
 	configPath, dir                                string
@@ -126,6 +128,7 @@ func (p *panel) controls() {
 	p.rotate.SetEnabled(editable)
 	p.refreshButton.SetEnabled(!p.busy && !p.polling)
 	p.startupButton.SetEnabled(!p.busy && p.startupKnown)
+	p.wolButton.SetEnabled(!p.busy && p.network.CurrentIndex() >= 0)
 	if dirty {
 		p.edits.SetText("Unsaved changes")
 	} else if !editable {
@@ -204,6 +207,28 @@ func (p *panel) updateNetwork() {
 	p.url.SetText(agentURL(p.cfg, a.IP))
 	p.mac.SetText(a.MAC)
 	p.broadcast.SetText(a.Broadcast)
+	p.controls()
+}
+func (p *panel) enableWakeOnLAN() {
+	i := p.network.CurrentIndex()
+	if i < 0 || i >= len(p.adapters) {
+		p.fail(fmt.Errorf("choose a network adapter first"))
+		return
+	}
+	a := p.adapters[i]
+	encodedName := base64.StdEncoding.EncodeToString([]byte(a.Interface))
+	p.async(func() error {
+		cmd := hiddenCommand("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(p.dir, "enable-wol.ps1"), "-AdapterNameBase64", encodedName)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			message := strings.TrimSpace(string(out))
+			if message == "" {
+				message = "administrator approval was canceled or the adapter does not support Wake-on-LAN"
+			}
+			return fmt.Errorf("Wake-on-LAN: %s", message)
+		}
+		return nil
+	}, func() { p.log("Wake-on-LAN enabled for " + a.Interface) })
 }
 func (p *panel) saveConfig() {
 	cfg := p.cfg
@@ -390,7 +415,7 @@ func main() {
 			}},
 			Composite{MaxSize: Size{Height: 38}, Layout: HBox{MarginsZero: true}, Children: []Widget{PushButton{AssignTo: &p.start, Text: "Start agent", MinSize: Size{Width: 110, Height: 32}, MaxSize: Size{Width: 110, Height: 32}, OnClicked: p.startAgent}, PushButton{AssignTo: &p.stop, Text: "Stop agent", MinSize: Size{Width: 110, Height: 32}, MaxSize: Size{Width: 110, Height: 32}, OnClicked: p.stopAgent}, HSpacer{}, PushButton{AssignTo: &p.refreshButton, Text: "\uE72C", Font: copyFont, MinSize: Size{Width: 34, Height: 32}, MaxSize: Size{Width: 34, Height: 32}, Accessibility: Accessibility{Name: "Refresh status"}, ToolTipText: "Refresh status", OnClicked: p.refresh}, PushButton{Text: "Hide to tray", MinSize: Size{Width: 110, Height: 32}, MaxSize: Size{Width: 110, Height: 32}, OnClicked: func() { p.window.Hide() }}}},
 			Composite{MinSize: Size{Height: 1}, MaxSize: Size{Height: 1}, Background: SolidColorBrush{Color: walk.RGB(224, 228, 232)}},
-			Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{Label{Text: "Phone connection", Font: heading}, HSpacer{}, PushButton{Text: "\uED14", Font: copyFont, MinSize: Size{Width: 28, Height: 24}, MaxSize: Size{Width: 28, Height: 24}, Accessibility: Accessibility{Name: "Show QR code"}, ToolTipText: "Show QR code", OnClicked: p.showPairing}}},
+			Composite{Layout: HBox{MarginsZero: true}, Children: []Widget{Label{Text: "Phone connection", Font: heading}, HSpacer{}, PushButton{AssignTo: &p.wolButton, Text: "Enable Wake-on-LAN", MinSize: Size{Width: 170, Height: 26}, ToolTipText: "Enable magic-packet wake for the selected adapter (administrator approval required)", OnClicked: p.enableWakeOnLAN}, PushButton{Text: "\uED14", Font: copyFont, MinSize: Size{Width: 28, Height: 24}, MaxSize: Size{Width: 28, Height: 24}, Accessibility: Accessibility{Name: "Show QR code"}, ToolTipText: "Show QR code", OnClicked: p.showPairing}}},
 			Composite{Layout: Grid{Columns: 3, Spacing: 3, MarginsZero: true}, Children: []Widget{
 				Label{Text: "Network adapter", MinSize: Size{Width: 118}, TextColor: muted}, ComboBox{AssignTo: &p.network, Accessibility: Accessibility{Name: "Network adapter selection"}, Model: names, CurrentIndex: 0, ColumnSpan: 2, OnCurrentIndexChanged: p.updateNetwork},
 				Label{Text: "Agent URL", TextColor: muted}, LineEdit{AssignTo: &p.url, Accessibility: Accessibility{Name: "Agent URL value"}, ReadOnly: true}, copyButton("agent URL", func() string { return p.url.Text() }),

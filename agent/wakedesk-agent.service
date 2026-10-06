@@ -12,6 +12,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+RuntimeDirectory=wakedesk
+RuntimeDirectoryMode=0700
+ReadWritePaths=/etc/wakedesk
 
 [Install]
 WantedBy=multi-user.target

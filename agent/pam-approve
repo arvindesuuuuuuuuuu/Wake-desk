@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""Consume one locally approved WakeDesk sign-in. No password is read."""
+import json
+import os
+import re
+import socket
+import sys
+
+SOCKET = '/run/wakedesk/unlock.sock'
+
+
+def main():
+    user = os.environ.get('PAM_USER', '')
+    if (os.environ.get('PAM_TYPE') != 'auth' or
+            os.environ.get('PAM_SERVICE') != 'gdm-password' or
+            not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}', user)):
+        return 1
+    body = json.dumps({'user': user}, separators=(',', ':')).encode()
+    request = (b'POST /consume HTTP/1.1\r\nHost: localhost\r\n'
+               b'Content-Type: application/json\r\nConnection: close\r\n'
+               + f'Content-Length: {len(body)}\r\n\r\n'.encode() + body)
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(2)
+    try:
+        client.connect(SOCKET)
+        client.sendall(request)
+        response = client.recv(128)
+        return 0 if response.startswith(b'HTTP/1.1 200 ') else 1
+    except OSError:
+        return 1
+    finally:
+        client.close()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
