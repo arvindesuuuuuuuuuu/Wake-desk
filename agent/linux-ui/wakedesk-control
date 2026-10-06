@@ -1,0 +1,9 @@
+#!/bin/sh
+# A terminal inside a Snap IDE may export GTK modules from its private runtime.
+# Use the host GTK runtime for this system-installed application.
+case "${GTK_PATH:-}:${GIO_MODULE_DIR:-}:${GTK_EXE_PREFIX:-}" in
+  */snap/*)
+    unset GTK_PATH GIO_MODULE_DIR GIO_EXTRA_MODULES GTK_EXE_PREFIX GTK_DATA_PREFIX GSETTINGS_SCHEMA_DIR
+    ;;
+esac
+exec /usr/bin/python3 /usr/local/lib/wakedesk/panel.py "$@"

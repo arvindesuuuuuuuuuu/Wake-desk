@@ -79,10 +79,40 @@ On the Linux PC, install Go 1.22+ and build the headless agent from `agent/`:
 cd agent
 go test ./...
 go build -o pc-agent-linux .
+sh ./build-linux-ui.sh
 sudo sh ./install-linux.sh
 ```
 
-The installer copies the binary to `/usr/local/bin/wakedesk-agent`, creates `/etc/wakedesk/config.json` with a random token if no config exists, and enables `wakedesk-agent.service`. It preserves an existing config and token. It binds to port 8787 on all interfaces; restrict inbound access to your trusted LAN using your Linux firewall. View the token with `sudo cat /etc/wakedesk/config.json` and enter it in the Android Connection settings. Use the Linux PC's LAN IP as the Agent URL, for example `http://192.168.1.50:8787`. For manual pairing, find its wired MAC and broadcast address with `ip -4 addr` and `ip link`. The Windows QR control panel is not part of the Linux build.
+The installer copies the binary to `/usr/local/bin/wakedesk-agent`, creates `/etc/wakedesk/config.json` with a random token if no config exists, and enables `wakedesk-agent.service`. It preserves an existing config and token. It binds to port 8787 on all interfaces; restrict inbound access to your trusted LAN using your Linux firewall. View the token with `sudo cat /etc/wakedesk/config.json` and enter it in the Android Connection settings. Use the Linux PC's LAN IP as the Agent URL, for example `http://192.168.1.50:8787`. For manual pairing, find its wired MAC and broadcast address with `ip -4 addr` and `ip link`. The Linux control panel provides phone pairing details and a QR code compatible with the Android scanner.
+
+### Linux control panel
+
+The Linux installer also adds **WakeDesk** to the desktop application menu. Open it there or run `wakedesk-control`. The native GTK panel opens at 520 × 600, matching the Windows panel, and shows service status, PC uptime, and start-at-boot status. **Show QR code** sits beside the **Phone connection** heading. **Start agent** and **Stop agent** control the existing system service. **Enable startup** / **Disable startup** changes whether the agent starts at boot; it does not stop a running agent. Closing the panel leaves the agent running.
+
+Click **Unlock connection settings** and authenticate to read the protected configuration. Choose the network adapter reachable from your phone, then copy the Agent URL, MAC address, broadcast address, and access token into the Android app. The token is masked until **Show token** is selected. The panel checks the authenticated status endpoint after unlocking. A loopback-only listen address cannot be reached from your phone.
+
+Click **Show QR code** to pair through **Connection > Scan PC QR code** on Android. The QR contains the saved token and the selected adapter’s connection details. Save or discard pending edits before displaying it. The image is generated locally in memory and is never uploaded or written to disk.
+
+Stop the agent to edit its listen address or generate a token. **Save settings** writes the changes; **Discard changes** restores the saved values. Generated tokens remain drafts until saved. Update the Android app after changing the token or URL, then start the agent again. Existing TLS certificate/key paths and other configuration fields are preserved. The panel runs as your desktop user; protected configuration and service operations request administrator authentication through `pkexec`. The panel does not change firewall rules or firmware Wake-on-LAN settings.
+
+For an already installed agent, install only the panel without restarting the service:
+
+```sh
+cd agent
+# Ubuntu/Debian desktop prerequisites:
+sudo apt install python3-gi gir1.2-gtk-3.0 pkexec iproute2
+sh ./build-linux-ui.sh
+sudo sh ./install-linux-ui.sh
+wakedesk-control
+```
+
+The panel requires Python 3 and GTK 3 Python bindings. Building its QR helper requires Go 1.22+; the installed panel does not require Go. If the panel was already open when updated, close and reopen it. The Go agent remains independent of the panel and continues to run on headless Linux installations. To verify the helper and desktop behavior without invoking PC power actions:
+
+```sh
+/usr/bin/python3 -m unittest discover -s agent/linux-ui -p 'test_*.py' -v
+```
+
+The GTK smoke test requires a desktop display; it is skipped on headless systems.
 
 The included `agent/pc-agent-linux` is built for Linux x86-64. If your Linux PC uses another CPU architecture, run the build command on that PC instead.
 
@@ -102,7 +132,7 @@ The Android dashboard's **Control PC** selector chooses which saved PC receives 
 
 ### QR pairing
 
-On Windows, choose the network adapter reachable from your phone and click **Show QR code** under Phone connection. On Android, open Connection and tap **Scan PC QR code**, allow camera access, and scan the Windows code. The PC name, URL, access token, MAC, and broadcast address fill automatically. Tap **Connect** to save securely and check the connection. Canceling the scanner leaves your settings unchanged; manual entry remains available.
+On Windows or Linux, choose the network adapter reachable from your phone and click **Show QR code** under Phone connection. On Linux, first click **Unlock connection settings** and authenticate. On Android, open Connection and tap **Scan PC QR code**, allow camera access, and scan the PC’s code. The PC name, URL, access token, MAC, and broadcast address fill automatically. Tap **Connect** to save securely and check the connection. Canceling the scanner leaves your settings unchanged; manual entry remains available.
 
 Keep both devices on the same trusted network. The QR contains your saved access token, grants control of the PC, and should never be shared or screenshotted. It is generated locally in memory, not uploaded or saved as a file. Save or discard pending Windows edits before pairing. Scan again after changing the token or network address. QR pairing does not configure firewall rules or enable Wake-on-LAN hardware settings.
 

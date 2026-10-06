@@ -29,4 +29,5 @@ install -m 0644 "$script_dir/wakedesk-agent.service" /etc/systemd/system/wakedes
 systemctl daemon-reload
 systemctl enable wakedesk-agent.service
 systemctl restart wakedesk-agent.service
+sh "$script_dir/install-linux-ui.sh"
 echo "WakeDesk agent installed. Read the phone access token from /etc/wakedesk/config.json using sudo."

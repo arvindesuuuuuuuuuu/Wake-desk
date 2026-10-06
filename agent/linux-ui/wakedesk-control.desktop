@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=WakeDesk
+Comment=Manage the Linux agent and phone connection
+Exec=/usr/local/bin/wakedesk-control
+Icon=computer
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
