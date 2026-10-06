@@ -128,29 +128,57 @@ class DashboardView extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
                 children: [
                   if (devices.isNotEmpty) ...[
-                    DropdownButtonFormField<int>(
-                      key: ValueKey('$selectedDevice:$busy'),
-                      initialValue: selectedDevice,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
+                    InputDecorator(
+                      decoration: InputDecoration(
                         labelText: 'Control PC',
-                        prefixIcon: Icon(Icons.computer_rounded),
+                        enabled: ready && !busy && onSelectDevice != null,
+                        prefixIcon: const Icon(Icons.computer_rounded),
                       ),
-                      items: [
-                        for (var i = 0; i < devices.length; i++)
-                          DropdownMenuItem(
-                            value: i,
-                            child: Text(
-                              devices[i]['name'] as String? ?? 'PC ${i + 1}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: ready && !busy && onSelectDevice != null
-                          ? (value) {
-                              if (value != null) onSelectDevice!(value);
-                            }
-                          : null,
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<int>(
+                          value: selectedDevice,
+                          isExpanded: true,
+                          isDense: true,
+                          menuMaxHeight: 320,
+                          itemHeight: null,
+                          borderRadius: BorderRadius.circular(8),
+                          dropdownColor: colors.surface,
+                          selectedItemBuilder: (_) => [
+                            for (var i = 0; i < devices.length; i++)
+                              Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: Text(
+                                  devices[i]['name'] as String? ??
+                                      'PC ${i + 1}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          items: [
+                            for (var i = 0; i < devices.length; i++)
+                              DropdownMenuItem(
+                                value: i,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  child: Text(
+                                    devices[i]['name'] as String? ??
+                                        'PC ${i + 1}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                          ],
+                          onChanged: ready && !busy && onSelectDevice != null
+                              ? (value) {
+                                  if (value != null) onSelectDevice!(value);
+                                }
+                              : null,
+                        ),
+                      ),
                     ),
                     Align(
                       alignment: Alignment.centerRight,
@@ -277,7 +305,8 @@ class DashboardView extends StatelessWidget {
                           ])
                             SizedBox(
                               width: (constraints.maxWidth - 12) / 2,
-                              height: 100 + (scale - 1).clamp(0, 4) * 38,
+                              height: (100 + (scale - 1).clamp(0, 4) * 38)
+                                  .ceilToDouble(),
                               child: OutlinedButton(
                                 onPressed: online && !busy
                                     ? () => onCommand(action.$1)

@@ -156,9 +156,82 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tester.ensureVisible(find.text('Shutdown'));
+    await tester.scrollUntilVisible(find.text('Shutdown'), 200);
     expect(tester.takeException(), isNull);
   });
+  testWidgets(
+    'Control PC menu fits narrow screens and follows saved selection',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final devices = [
+        {...settings, 'name': 'Office workstation with a long device name'},
+        {...settings, 'name': 'Home workstation with a long device name'},
+        for (var i = 0; i < 10; i++) {...settings, 'name': 'PC $i'},
+      ];
+      var selected = 0;
+      int? requested;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: appTheme(Brightness.light),
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: const TextScaler.linear(1.6)),
+                child: DashboardView(
+                  devices: devices,
+                  selectedDevice: selected,
+                  settings: devices[selected],
+                  status: null,
+                  connection: 'Offline',
+                  ready: true,
+                  busy: false,
+                  checking: false,
+                  onSelectDevice: (value) async => requested = value,
+                  onRefresh: () async {},
+                  onConfigure: () async {},
+                  onWake: () async {},
+                  onCommand: (_) async {},
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButton<int>));
+      await tester.pumpAndSettle();
+      final menu = tester.getRect(find.byType(Scrollable).last);
+      expect(menu.left, greaterThanOrEqualTo(0));
+      expect(menu.right, lessThanOrEqualTo(320));
+      expect(menu.height, lessThanOrEqualTo(320));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text(devices[1]['name'] as String).last);
+      await tester.pumpAndSettle();
+      expect(requested, 1);
+      // Until the parent saves the switch, the displayed PC must stay accurate.
+      expect(
+        tester
+            .widget<DropdownButton<int>>(find.byType(DropdownButton<int>))
+            .value,
+        0,
+      );
+      update(() => selected = 1);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<DropdownButton<int>>(find.byType(DropdownButton<int>))
+            .value,
+        1,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('Connection form preview and token visibility', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

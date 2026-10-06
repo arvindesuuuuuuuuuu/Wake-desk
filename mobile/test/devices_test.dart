@@ -57,13 +57,15 @@ class AgentHeaders implements HttpHeaders {
 
 class AgentRequest implements HttpClientRequest {
   AgentRequest(this.method, this.uri, this.pending);
+  @override
   final String method;
+  @override
   final Uri uri;
   final Completer<HttpClientResponse>? pending;
   String body = '';
 
   @override
-  final headers = AgentHeaders();
+  final AgentHeaders headers = AgentHeaders();
 
   @override
   void write(Object? object) => body += object.toString();
@@ -89,16 +91,21 @@ class AgentResponse extends Stream<List<int>> implements HttpClientResponse {
     Function? onError,
     void Function()? onDone,
     bool? cancelOnError,
-  }) => Stream.value(utf8.encode(jsonEncode({
-    'name': name,
-    'addresses': ['192.168.1.50'],
-    'uptime_seconds': 60,
-  }))).listen(
-    onData,
-    onError: onError,
-    onDone: onDone,
-    cancelOnError: cancelOnError,
-  );
+  }) =>
+      Stream.value(
+        utf8.encode(
+          jsonEncode({
+            'name': name,
+            'addresses': ['192.168.1.50'],
+            'uptime_seconds': 60,
+          }),
+        ),
+      ).listen(
+        onData,
+        onError: onError,
+        onDone: onDone,
+        cancelOnError: cancelOnError,
+      );
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -124,12 +131,15 @@ void main() {
     });
     await tester.pumpWidget(const PcControlApp());
     await tester.pumpAndSettle();
-    expect(tester.widget<DashboardView>(find.byType(DashboardView)).devices,
-        [first]);
+    expect(tester.widget<DashboardView>(find.byType(DashboardView)).devices, [
+      first,
+    ]);
     await tester.tap(find.text('Add PC'));
     await tester.pumpAndSettle();
-    expect(tester.widget<SettingsPage>(find.byType(SettingsPage)).initial,
-        isEmpty);
+    expect(
+      tester.widget<SettingsPage>(find.byType(SettingsPage)).initial,
+      isEmpty,
+    );
     // Return the same payload as saving the shared connection form or QR flow.
     tester.state<NavigatorState>(find.byType(Navigator).first).pop(second);
     await tester.pumpAndSettle();
@@ -138,8 +148,10 @@ void main() {
     expect(saved['selected'], 1);
     await tester.tap(find.byTooltip('Connection settings'));
     await tester.pumpAndSettle();
-    expect(tester.widget<SettingsPage>(find.byType(SettingsPage)).initial,
-        second);
+    expect(
+      tester.widget<SettingsPage>(find.byType(SettingsPage)).initial,
+      second,
+    );
     final edited = {...second, 'name': 'Home desktop'};
     tester.state<NavigatorState>(find.byType(Navigator).first).pop(edited);
     await tester.pumpAndSettle();
@@ -148,46 +160,55 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('Switching ignores stale status and sends commands to chosen PC', (
-    tester,
-  ) async {
-    final first = device('Office');
-    final second = device('Home');
-    tester.view.physicalSize = const Size(390, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    FlutterSecureStorage.setMockInitialValues({
-      'devices': jsonEncode({'devices': [first, second], 'selected': 0}),
-    });
-    final delayed = Completer<HttpClientResponse>();
-    agents.pending = delayed;
-    await tester.pumpWidget(const PcControlApp());
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<int>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Home').last);
-    await tester.pumpAndSettle();
-    delayed.complete(AgentResponse('old-office-status'));
-    await tester.pumpAndSettle();
-    final view = tester.widget<DashboardView>(find.byType(DashboardView));
-    expect(view.settings, second);
-    expect(view.status?['name'], 'home');
-    expect(view.checking, isFalse);
-    await tester.ensureVisible(find.text('Lock'));
-    await tester.tap(find.text('Lock'));
-    await tester.pumpAndSettle();
-    final command = agents.requests.singleWhere((r) => r.method == 'POST');
-    expect(command.uri.toString(), '${second['url']}/v1/commands');
-    expect(command.headers.values['Authorization'], 'Bearer ${second['token']}');
-    expect(jsonDecode(command.body), {'command': 'lock'});
-    await tester.pumpWidget(const SizedBox());
-    await tester.pumpWidget(const PcControlApp());
-    await tester.pumpAndSettle();
-    expect(tester.widget<DashboardView>(find.byType(DashboardView)).settings,
-        second);
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'Switching ignores stale status and sends commands to chosen PC',
+    (tester) async {
+      final first = device('Office');
+      final second = device('Home');
+      tester.view.physicalSize = const Size(390, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      FlutterSecureStorage.setMockInitialValues({
+        'devices': jsonEncode({
+          'devices': [first, second],
+          'selected': 0,
+        }),
+      });
+      final delayed = Completer<HttpClientResponse>();
+      agents.pending = delayed;
+      await tester.pumpWidget(const PcControlApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButton<int>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Home').last);
+      await tester.pumpAndSettle();
+      delayed.complete(AgentResponse('old-office-status'));
+      await tester.pumpAndSettle();
+      final view = tester.widget<DashboardView>(find.byType(DashboardView));
+      expect(view.settings, second);
+      expect(view.status?['name'], 'home');
+      expect(view.checking, isFalse);
+      await tester.ensureVisible(find.text('Lock'));
+      await tester.tap(find.text('Lock'));
+      await tester.pumpAndSettle();
+      final command = agents.requests.singleWhere((r) => r.method == 'POST');
+      expect(command.uri.toString(), '${second['url']}/v1/commands');
+      expect(
+        command.headers.values['Authorization'],
+        'Bearer ${second['token']}',
+      );
+      expect(jsonDecode(command.body), {'command': 'lock'});
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(const PcControlApp());
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<DashboardView>(find.byType(DashboardView)).settings,
+        second,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('Device selector is disabled during power confirmation', (
     tester,
@@ -206,17 +227,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Shutdown'));
     await tester.tap(find.text('Shutdown'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Shutdown Office?'), findsOneWidget);
     final view = tester.widget<DashboardView>(find.byType(DashboardView));
     expect(view.busy, isTrue);
-    expect(tester.widget<DropdownButtonFormField<int>>(
-        find.byType(DropdownButtonFormField<int>)).onChanged, isNull);
+    expect(
+      tester
+          .widget<DropdownButton<int>>(find.byType(DropdownButton<int>))
+          .onChanged,
+      isNull,
+    );
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(agents.requests.where((r) => r.method == 'POST'), isEmpty);
-    expect(tester.widget<DashboardView>(find.byType(DashboardView)).busy,
-        isFalse);
+    expect(
+      tester.widget<DashboardView>(find.byType(DashboardView)).busy,
+      isFalse,
+    );
     await tester.pumpWidget(const SizedBox());
   });
 }
